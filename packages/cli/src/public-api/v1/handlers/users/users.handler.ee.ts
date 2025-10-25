@@ -1,4 +1,8 @@
-import { InviteUsersRequestDto, RoleChangeRequestDto } from '@n8n/api-types';
+import {
+	InviteUsersRequestDto,
+	ProvisionUserRequestDto,
+	RoleChangeRequestDto,
+} from '@n8n/api-types';
 import type { AuthenticatedRequest } from '@n8n/db';
 import { ProjectRelationRepository } from '@n8n/db';
 import { Container } from '@n8n/di';
@@ -20,6 +24,7 @@ import {
 import { encodeNextCursor } from '../../shared/services/pagination.service';
 
 type Create = AuthenticatedRequest<{}, {}, InviteUsersRequestDto>;
+type Provision = AuthenticatedRequest<{}, {}, ProvisionUserRequestDto>;
 type Delete = UserRequest.Delete;
 type ChangeRole = AuthenticatedRequest<{ id: string }, {}, RoleChangeRequestDto, {}>;
 
@@ -94,6 +99,25 @@ export = {
 				data as InviteUsersRequestDto,
 			);
 			return res.status(201).json(usersInvited);
+		},
+	],
+	/**
+	 * Public API endpoint for programmatic user provisioning.
+	 * Creates users without email invites and returns API key for immediate authentication.
+	 * Requires API key with 'user:create' scope.
+	 */
+	provisionUser: [
+		apiKeyHasScopeWithGlobalScopeFallback({ scope: 'user:create' }),
+		async (req: Provision, res: Response) => {
+			// Validate request body
+			const { data, error } = ProvisionUserRequestDto.safeParse(req.body);
+			if (error) {
+				return res.status(400).json(error.errors[0]);
+			}
+
+			// Delegate to UsersController for business logic
+			const result = await Container.get(UsersController).provisionUser(req, res, data);
+			return res.status(201).json(result);
 		},
 	],
 	deleteUser: [

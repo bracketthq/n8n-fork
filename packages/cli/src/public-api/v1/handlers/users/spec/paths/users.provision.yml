@@ -1,0 +1,58 @@
+post:
+  x-eov-operation-id: provisionUser
+  x-eov-operation-handler: v1/handlers/users/users.handler.ee
+  tags:
+    - User
+  summary: Provision a user programmatically
+  description: Create a user without sending an email invite, and return an API key for immediate use. Intended for programmatic user provisioning.
+  requestBody:
+    description: User to be provisioned.
+    required: true
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            email:
+              type: string
+              format: email
+              example: user@example.com
+            firstName:
+              type: string
+              example: John
+            lastName:
+              type: string
+              example: Doe
+          required:
+            - email
+  responses:
+    '201':
+      description: User provisioned successfully.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              user_id:
+                type: string
+                example: '9c4f3c8f-e928-4d38-a0cc-61b8b0c6f9de'
+              email:
+                type: string
+                example: user@example.com
+              api_key:
+                type: string
+                example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+    '400':
+      description: Bad request - Invalid input or user already exists with provisioned API key.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                example: User already exists with a provisioned API key
+    '401':
+      $ref: '../../../../shared/spec/responses/unauthorized.yml'
+    '403':
+      $ref: '../../../../shared/spec/responses/forbidden.yml'

@@ -25,6 +25,8 @@ describe('UsersController', () => {
 		projectService,
 		eventService,
 		mock(),
+		mock(), // passwordUtility
+		mock(), // publicApiKeyService
 	);
 
 	beforeEach(() => {

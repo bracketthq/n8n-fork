@@ -5,6 +5,8 @@ import {
 	userBaseSchema,
 	UsersListFilterDto,
 	usersListSchema,
+	ProvisionUserRequestDto,
+	type ProvisionUserResponse,
 } from '@n8n/api-types';
 import { Logger } from '@n8n/backend-common';
 import type { PublicUser } from '@n8n/db';
@@ -26,12 +28,14 @@ import {
 	Get,
 	RestController,
 	Patch,
+	Post,
 	Licensed,
 	Body,
 	Param,
 	Query,
 } from '@n8n/decorators';
-import { hasGlobalScope } from '@n8n/permissions';
+import { hasGlobalScope, getApiKeyScopesForRole } from '@n8n/permissions';
+import crypto from 'node:crypto';
 import { Response } from 'express';
 
 import { AuthService } from '@/auth/auth.service';
@@ -43,7 +47,9 @@ import { EventService } from '@/events/event.service';
 import { ExternalHooks } from '@/external-hooks';
 import { UserRequest } from '@/requests';
 import { FolderService } from '@/services/folder.service';
+import { PasswordUtility } from '@/services/password.utility';
 import { ProjectService } from '@/services/project.service.ee';
+import { PublicApiKeyService } from '@/services/public-api-key.service';
 import { UserService } from '@/services/user.service';
 import { WorkflowService } from '@/workflows/workflow.service';
 
@@ -63,6 +69,8 @@ export class UsersController {
 		private readonly projectService: ProjectService,
 		private readonly eventService: EventService,
 		private readonly folderService: FolderService,
+		private readonly passwordUtility: PasswordUtility,
+		private readonly publicApiKeyService: PublicApiKeyService,
 	) {}
 
 	static ERROR_MESSAGES = {
@@ -361,5 +369,128 @@ export class UsersController {
 		);
 
 		return { success: true };
+	}
+
+	/**
+	 * Provision a user programmatically without email invite.
+	 *
+	 * Creates a new user account with:
+	 * - A cryptographically secure random password (unknown to anyone, API-only access)
+	 * - A personal project (standard n8n user setup)
+	 * - An API key with appropriate scopes based on the user's role
+	 *
+	 * If the user already exists:
+	 * - Checks if they already have a provisioned API key
+	 * - If not, creates a new API key for them
+	 * - If they do, returns an error to prevent duplicate provisioning
+	 *
+	 * @param req - Authenticated request (requires 'user:create' scope)
+	 * @param payload - User data (email is required, firstName/lastName optional)
+	 * @returns User ID, email, and API key for immediate use
+	 * @throws BadRequestError if user exists with provisioned API key
+	 */
+	@Post('/provision-user')
+	@GlobalScope('user:create')
+	async provisionUser(
+		req: AuthenticatedRequest,
+		_res: Response,
+		@Body payload: ProvisionUserRequestDto,
+	): Promise<ProvisionUserResponse> {
+		this.logger.debug('User provision request received', {
+			requestedBy: req.user.id,
+			email: payload.email,
+		});
+
+		// Check if user already exists
+		const existingUser = await this.userRepository.findOne({
+			where: { email: payload.email },
+			relations: ['role'],
+		});
+
+		if (existingUser) {
+			this.logger.debug('User already exists, checking for existing provisioned API key', {
+				email: payload.email,
+				userId: existingUser.id,
+			});
+
+			// Check if user already has a provisioned API key
+			const existingKeys = await this.publicApiKeyService.getRedactedApiKeysForUser(existingUser);
+			const brackettKey = existingKeys.find((key) => key.label === 'Brackett API Key');
+
+			if (brackettKey) {
+				this.logger.warn('Attempted to re-provision user with existing API key', {
+					userId: existingUser.id,
+					email: existingUser.email,
+				});
+				throw new BadRequestError(
+					'User already exists with a provisioned API key. Please use the existing credentials or delete the user first.',
+				);
+			}
+
+			// Create new API key for existing user
+			this.logger.info('Creating new API key for existing user', {
+				userId: existingUser.id,
+				email: existingUser.email,
+			});
+
+			const apiKeyData = await this.publicApiKeyService.createPublicApiKeyForUser(existingUser, {
+				label: 'Brackett API Key',
+				expiresAt: null,
+				scopes: getApiKeyScopesForRole(existingUser),
+			});
+
+			return {
+				user_id: existingUser.id,
+				email: existingUser.email,
+				api_key: apiKeyData.apiKey,
+			};
+		}
+
+		// Generate cryptographically secure random password
+		// User will never know this password - they can only authenticate via API key
+		const randomPassword = crypto.randomBytes(32).toString('base64url');
+		const hashedPassword = await this.passwordUtility.hash(randomPassword);
+
+		this.logger.info('Creating new provisioned user', {
+			email: payload.email,
+			requestedBy: req.user.id,
+		});
+
+		// Create user with personal project (standard n8n user setup)
+		const { user } = await this.userRepository.createUserWithProject({
+			email: payload.email,
+			password: hashedPassword,
+			firstName: payload.firstName || '',
+			lastName: payload.lastName || '',
+			role: { slug: 'global:member' },
+		});
+
+		// Generate API key with appropriate scopes for the user's role
+		const apiKeyData = await this.publicApiKeyService.createPublicApiKeyForUser(user, {
+			label: 'Brackett API Key',
+			expiresAt: null, // Never expires
+			scopes: getApiKeyScopesForRole(user),
+		});
+
+		// Emit event for audit logging
+		this.eventService.emit('user-invited', {
+			user: req.user,
+			targetUserId: [user.id],
+			publicApi: false,
+			emailSent: false,
+			inviteeRole: 'global:member',
+		});
+
+		this.logger.info('User provisioned successfully', {
+			userId: user.id,
+			email: user.email,
+			requestedBy: req.user.id,
+		});
+
+		return {
+			user_id: user.id,
+			email: user.email,
+			api_key: apiKeyData.apiKey,
+		};
 	}
 }
