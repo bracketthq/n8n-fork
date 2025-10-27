@@ -27,3 +27,31 @@ export type ProvisionUserResponse = {
 	 */
 	api_key: string;
 };
+
+/**
+ * Response from the getUserCredentials endpoint.
+ *
+ * Returns the most recent API key for a user.
+ *
+ * SECURITY WARNING: Contains the FULL unredacted API key.
+ * - This should be transmitted over secure channels only
+ * - Log all access to this endpoint for audit purposes
+ * - The API key has full permissions based on user's role
+ */
+export type GetUserCredentialsResponse = {
+	/** UUID of the user */
+	user_id: string;
+	/** Email address of the user */
+	email: string;
+	/**
+	 * FULL unredacted JWT API key (most recent non-expired).
+	 * This is the complete token that can be used for authentication.
+	 */
+	api_key: string;
+	/** Label of the API key (e.g., "Brackett API Key") */
+	label: string;
+	/** Unix timestamp when this key expires (null = never) */
+	expires_at: number | null;
+	/** ISO timestamp when this key was created */
+	created_at: string;
+};

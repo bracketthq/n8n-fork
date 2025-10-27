@@ -72,6 +72,8 @@ paths:
     $ref: './handlers/users/spec/paths/users.yml'
   /users/provision:
     $ref: './handlers/users/spec/paths/users.provision.yml'
+  /users/credentials:
+    $ref: './handlers/users/spec/paths/users.get-credentials.yml'
   /users/{id}:
     $ref: './handlers/users/spec/paths/users.id.yml'
   /users/{id}/role:

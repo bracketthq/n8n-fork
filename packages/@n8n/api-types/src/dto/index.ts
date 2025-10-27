@@ -42,6 +42,7 @@ export { RoleChangeRequestDto } from './user/role-change-request.dto';
 export { SettingsUpdateRequestDto } from './user/settings-update-request.dto';
 export { UserUpdateRequestDto } from './user/user-update-request.dto';
 export { ProvisionUserRequestDto } from './user/provision-user-request.dto';
+export { GetUserCredentialsRequestDto } from './user/get-user-credentials-request.dto';
 
 export { CommunityRegisteredRequestDto } from './license/community-registered-request.dto';
 

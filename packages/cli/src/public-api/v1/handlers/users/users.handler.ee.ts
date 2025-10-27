@@ -1,6 +1,7 @@
 import {
 	InviteUsersRequestDto,
 	ProvisionUserRequestDto,
+	GetUserCredentialsRequestDto,
 	RoleChangeRequestDto,
 } from '@n8n/api-types';
 import type { AuthenticatedRequest } from '@n8n/db';
@@ -25,6 +26,7 @@ import { encodeNextCursor } from '../../shared/services/pagination.service';
 
 type Create = AuthenticatedRequest<{}, {}, InviteUsersRequestDto>;
 type Provision = AuthenticatedRequest<{}, {}, ProvisionUserRequestDto>;
+type GetCredentials = AuthenticatedRequest<{}, {}, {}, GetUserCredentialsRequestDto>;
 type Delete = UserRequest.Delete;
 type ChangeRole = AuthenticatedRequest<{ id: string }, {}, RoleChangeRequestDto, {}>;
 
@@ -118,6 +120,34 @@ export = {
 			// Delegate to UsersController for business logic
 			const result = await Container.get(UsersController).provisionUser(req, res, data);
 			return res.status(201).json(result);
+		},
+	],
+	/**
+	 * Public API endpoint for retrieving user credentials.
+	 * Supports lookup by email or ID (preferred).
+	 *
+	 * SECURITY WARNING: Returns FULL unredacted API key.
+	 * Requires API key with 'user:read' scope.
+	 */
+	getUserCredentials: [
+		apiKeyHasScopeWithGlobalScopeFallback({ scope: 'user:read' }),
+		async (req: GetCredentials, res: Response) => {
+			// Validate query parameters
+			const { data, error } = GetUserCredentialsRequestDto.safeParse(req.query);
+			if (error) {
+				return res.status(400).json(error.errors[0]);
+			}
+
+			try {
+				const result = await Container.get(UsersController).getUserCredentials(req, res, data);
+				return res.status(200).json(result);
+			} catch (err) {
+				if (err.name === 'NotFoundError' || err.name === 'BadRequestError') {
+					const statusCode = err.name === 'NotFoundError' ? 404 : 400;
+					return res.status(statusCode).json({ message: err.message });
+				}
+				throw err;
+			}
 		},
 	],
 	deleteUser: [

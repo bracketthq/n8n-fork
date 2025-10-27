@@ -27,6 +27,8 @@ describe('UsersController', () => {
 		mock(),
 		mock(), // passwordUtility
 		mock(), // publicApiKeyService
+		mock(), // apiKeyRepository
+		mock(), // jwtService
 	);
 
 	beforeEach(() => {

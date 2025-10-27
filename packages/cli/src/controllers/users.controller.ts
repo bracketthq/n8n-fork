@@ -7,6 +7,8 @@ import {
 	usersListSchema,
 	ProvisionUserRequestDto,
 	type ProvisionUserResponse,
+	GetUserCredentialsRequestDto,
+	type GetUserCredentialsResponse,
 } from '@n8n/api-types';
 import { Logger } from '@n8n/backend-common';
 import type { PublicUser } from '@n8n/db';
@@ -18,6 +20,7 @@ import {
 	SharedCredentialsRepository,
 	SharedWorkflowRepository,
 	UserRepository,
+	ApiKeyRepository,
 	AuthenticatedRequest,
 	GLOBAL_ADMIN_ROLE,
 	GLOBAL_OWNER_ROLE,
@@ -47,6 +50,7 @@ import { EventService } from '@/events/event.service';
 import { ExternalHooks } from '@/external-hooks';
 import { UserRequest } from '@/requests';
 import { FolderService } from '@/services/folder.service';
+import { JwtService } from '@/services/jwt.service';
 import { PasswordUtility } from '@/services/password.utility';
 import { ProjectService } from '@/services/project.service.ee';
 import { PublicApiKeyService } from '@/services/public-api-key.service';
@@ -71,6 +75,8 @@ export class UsersController {
 		private readonly folderService: FolderService,
 		private readonly passwordUtility: PasswordUtility,
 		private readonly publicApiKeyService: PublicApiKeyService,
+		private readonly apiKeyRepository: ApiKeyRepository,
+		private readonly jwtService: JwtService,
 	) {}
 
 	static ERROR_MESSAGES = {
@@ -491,6 +497,117 @@ export class UsersController {
 			user_id: user.id,
 			email: user.email,
 			api_key: apiKeyData.apiKey,
+		};
+	}
+
+	/**
+	 * Get user credentials by email or ID.
+	 *
+	 * Returns the most recent API key for a user.
+	 * If the most recent key is expired, returns 404.
+	 *
+	 * SECURITY CONSIDERATIONS:
+	 * - Returns FULL unredacted API key (highly sensitive)
+	 * - All access is logged for audit trail
+	 * - Requires 'user:read' scope
+	 * - Only returns non-expired keys
+	 *
+	 * @param req - Authenticated request (requires 'user:read' scope)
+	 * @param payload - Contains either email or id
+	 * @returns User credentials with full unredacted API key
+	 * @throws BadRequestError if neither email nor id provided
+	 * @throws NotFoundError if user doesn't exist or has no valid API keys
+	 */
+	@Get('/credentials')
+	@GlobalScope('user:read')
+	async getUserCredentials(
+		req: AuthenticatedRequest,
+		_res: Response,
+		@Query payload: GetUserCredentialsRequestDto,
+	): Promise<GetUserCredentialsResponse> {
+		// Validate that at least one identifier is provided
+		if (!payload.email && !payload.id) {
+			throw new BadRequestError('Either email or id must be provided');
+		}
+
+		const identifier = payload.id || payload.email;
+		const identifierType = payload.id ? 'id' : 'email';
+
+		this.logger.debug('User credentials request received', {
+			requestedBy: req.user.id,
+			identifierType,
+			identifier,
+		});
+
+		// 1. Find user
+		const user = await this.userRepository.findOne({
+			where: payload.id ? { id: payload.id } : { email: payload.email },
+			relations: ['role'],
+		});
+
+		if (!user) {
+			this.logger.warn('User not found', {
+				identifierType,
+				identifier,
+				requestedBy: req.user.id,
+			});
+			throw new NotFoundError(`User with ${identifierType} ${identifier} not found`);
+		}
+
+		// 2. Get ONLY the most recent API key
+		const latestKey = await this.apiKeyRepository.findOne({
+			where: {
+				userId: user.id,
+				audience: 'public-api',
+			},
+			order: { createdAt: 'DESC' },
+		});
+
+		if (!latestKey) {
+			this.logger.warn('User has no API keys', {
+				userId: user.id,
+				email: user.email,
+				requestedBy: req.user.id,
+			});
+			throw new NotFoundError(`No API keys found for user`);
+		}
+
+		// 3. Check if the key is expired
+		const decoded = this.jwtService.decode(latestKey.apiKey);
+		const now = Math.floor(Date.now() / 1000);
+
+		if (decoded?.exp && decoded.exp <= now) {
+			this.logger.warn('Most recent API key is expired', {
+				userId: user.id,
+				email: user.email,
+				expiredAt: decoded.exp,
+				requestedBy: req.user.id,
+			});
+			throw new NotFoundError(`API key for user has expired`);
+		}
+
+		// 4. Log access for security audit
+		this.logger.warn('SENSITIVE: Full API key retrieved', {
+			userId: user.id,
+			email: user.email,
+			apiKeyLabel: latestKey.label,
+			requestedBy: req.user.id,
+			lookupMethod: identifierType,
+		});
+
+		this.eventService.emit('user-retrieved-user', {
+			userId: req.user.id,
+			publicApi: false,
+		});
+
+		// 5. Return credentials
+		return {
+			user_id: user.id,
+			email: user.email,
+			api_key: latestKey.apiKey,
+			label: latestKey.label,
+			expires_at: decoded?.exp ?? null,
+			created_at: latestKey.createdAt.toISOString(),
 		};
 	}
 }
