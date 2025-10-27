@@ -13,6 +13,7 @@ import { ActiveWorkflowManager } from '@/active-workflow-manager';
 import { EventService } from '@/events/event.service';
 import { ExternalHooks } from '@/external-hooks';
 import { addNodeIds, replaceInvalidCredentials } from '@/workflow-helpers';
+import { WorkflowExecutionService } from '@/workflows/workflow-execution.service';
 import { WorkflowFinderService } from '@/workflows/workflow-finder.service';
 import { WorkflowHistoryService } from '@/workflows/workflow-history.ee/workflow-history.service.ee';
 import { WorkflowService } from '@/workflows/workflow.service';
@@ -487,6 +488,53 @@ export = {
 			}
 
 			return res.json(tags);
+		},
+	],
+	executeWorkflow: [
+		apiKeyHasScope('workflow:execute'),
+		projectScope('workflow:execute', 'workflow'),
+		async (req: WorkflowRequest.Execute, res: express.Response): Promise<express.Response> => {
+			const { id: workflowId } = req.params;
+			const { data, options } = req.body;
+
+			const workflow = await Container.get(WorkflowFinderService).findWorkflowForUser(
+				workflowId,
+				req.user,
+				['workflow:execute'],
+			);
+
+			if (!workflow) {
+				// user trying to access a workflow they do not own
+				// or workflow does not exist
+				return res.status(404).json({ message: 'Not Found' });
+			}
+
+			try {
+				const result = await Container.get(WorkflowExecutionService).executeWorkflow(
+					workflowId,
+					data,
+					options || {},
+					req.user,
+				);
+
+				Container.get(EventService).emit('workflow-executed', {
+					user: req.user,
+					workflowId,
+					workflow,
+					executionId: result.executionId,
+					publicApi: true,
+				});
+
+				return res.json(result);
+			} catch (error) {
+				if (error instanceof Error) {
+					if (error.message.includes('not found')) {
+						return res.status(404).json({ message: error.message });
+					}
+					return res.status(400).json({ message: error.message });
+				}
+				throw error;
+			}
 		},
 	],
 };

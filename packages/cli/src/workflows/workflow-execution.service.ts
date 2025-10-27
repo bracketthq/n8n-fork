@@ -6,12 +6,14 @@ import { Service } from '@n8n/di';
 import type { Response } from 'express';
 import { ErrorReporter } from 'n8n-core';
 import type {
+	IDataObject,
 	IDeferredPromise,
 	IExecuteData,
 	IExecuteResponsePromiseData,
 	INode,
 	INodeExecutionData,
 	IPinData,
+	IRunData,
 	IRunExecutionData,
 	IWorkflowExecuteAdditionalData,
 	WorkflowExecuteMode,
@@ -19,6 +21,9 @@ import type {
 	IWorkflowBase,
 } from 'n8n-workflow';
 import { SubworkflowOperationError, Workflow } from 'n8n-workflow';
+
+import { BadRequestError } from '@/errors/response-errors/bad-request.error';
+import { NotFoundError } from '@/errors/response-errors/not-found.error';
 
 import { ExecutionDataService } from '@/executions/execution-data.service';
 import { SubworkflowPolicyChecker } from '@/executions/pre-execution-checks';
@@ -471,5 +476,284 @@ export class WorkflowExecutionService {
 					node.type !== 'n8n-nodes-base.respondToWebhook',
 			)
 			.sort((a) => (a.type.endsWith('webhook') ? -1 : 1));
+	}
+
+	/**
+	 * Execute a workflow with simplified public API
+	 * Automatically detects execution type and handles all node types
+	 *
+	 * @param workflowId - ID of the workflow to execute
+	 * @param inputData - Optional data to inject into the workflow
+	 * @param options - Execution options (destinationNode, executionId, etc.)
+	 * @param user - User executing the workflow
+	 * @returns Execution ID and optionally status if waiting for external input
+	 */
+	async executeWorkflow(
+		workflowId: string,
+		inputData: Record<string, unknown> | undefined,
+		options: {
+			destinationNode?: string;
+			executionId?: string;
+			dirtyNodes?: string[];
+			triggerData?: {
+				triggerName: string;
+				payload: Record<string, unknown>;
+			};
+		} = {},
+		user: User,
+	): Promise<{
+		executionId: string;
+		status?: 'waiting';
+	}> {
+		this.logger.debug('Executing workflow via public API', {
+			workflowId,
+			userId: user.id,
+			hasData: !!inputData,
+			options,
+		});
+
+		// Step 1: Load workflow from database
+		const workflow = await this.workflowRepository.findOneBy({ id: workflowId });
+
+		if (!workflow) {
+			throw new NotFoundError(`Workflow with ID "${workflowId}" not found`);
+		}
+
+		// Step 2: Create Workflow instance to analyze structure
+		const workflowInstance = new Workflow({
+			id: workflow.id,
+			name: workflow.name,
+			nodes: workflow.nodes,
+			connections: workflow.connections,
+			active: workflow.active,
+			nodeTypes: this.nodeTypes,
+			staticData: workflow.staticData,
+			settings: workflow.settings,
+		});
+
+		// Step 3: Load previous execution data if resuming
+		let previousRunData: IRunData | undefined;
+		let previousPinData: IPinData | undefined;
+
+		if (options.executionId) {
+			this.logger.debug('Loading previous execution for partial run', {
+				executionId: options.executionId,
+			});
+
+			const previousExecution = await this.executionRepository.findSingleExecution(
+				options.executionId,
+				{ includeData: true, unflattenData: true },
+			);
+
+			if (!previousExecution) {
+				throw new NotFoundError(`Execution with ID "${options.executionId}" not found`);
+			}
+
+			previousRunData = previousExecution.data?.resultData?.runData;
+			previousPinData = workflow.pinData;
+
+			this.logger.debug('Previous execution loaded', {
+				executionId: options.executionId,
+				nodesWithData: Object.keys(previousRunData || {}).length,
+			});
+		}
+
+		// Step 4: Determine execution type and build payload
+		const payload = this.buildExecutionPayload(
+			workflow,
+			workflowInstance,
+			inputData,
+			options,
+			previousRunData,
+			previousPinData,
+		);
+
+		this.logger.debug('Execution payload built', {
+			hasTriggerToStartFrom: !!payload.triggerToStartFrom,
+			hasRunData: !!payload.runData,
+			destinationNode: payload.destinationNode,
+			startNodesCount: payload.startNodes?.length || 0,
+		});
+
+		// Step 5: Execute workflow
+		const result = await this.executeManually(
+			payload,
+			user,
+			undefined, // pushRef
+			undefined, // streamingEnabled
+			undefined, // httpResponse
+		);
+
+		this.logger.debug('Workflow execution started', {
+			executionId: result.executionId,
+			waitingForWebhook: result.waitingForWebhook,
+		});
+
+		// Step 6: Return response
+		if (result.waitingForWebhook) {
+			return {
+				executionId: result.executionId!,
+				status: 'waiting',
+			};
+		}
+
+		return {
+			executionId: result.executionId!,
+		};
+	}
+
+	/**
+	 * Build execution payload based on input parameters
+	 * This method determines the correct execution path:
+	 * - PATH 1: Custom trigger with data (triggerToStartFrom)
+	 * - PATH 2: Partial execution (has runData and destinationNode)
+	 * - PATH 3: Full execution with input data
+	 * - PATH 4: Full execution without input data
+	 *
+	 * @private
+	 */
+	private buildExecutionPayload(
+		workflow: IWorkflowBase,
+		workflowInstance: Workflow,
+		inputData: Record<string, unknown> | undefined,
+		options: {
+			destinationNode?: string;
+			dirtyNodes?: string[];
+			triggerData?: { triggerName: string; payload: Record<string, unknown> };
+		},
+		previousRunData?: IRunData,
+		previousPinData?: IPinData,
+	): WorkflowRequest.ManualRunPayload {
+		const payload: WorkflowRequest.ManualRunPayload = {
+			workflowData: workflow,
+		};
+
+		// CASE 1: Custom trigger data provided
+		// User wants to start from a specific trigger with specific data
+		if (options.triggerData) {
+			this.logger.debug('Building payload: Custom trigger data', {
+				triggerName: options.triggerData.triggerName,
+			});
+
+			const triggerNode = workflowInstance.getNode(options.triggerData.triggerName);
+
+			if (!triggerNode) {
+				throw new BadRequestError(
+					`Trigger node "${options.triggerData.triggerName}" not found in workflow`,
+				);
+			}
+
+			// Set trigger to start from
+			payload.triggerToStartFrom = {
+				name: triggerNode.name,
+			};
+
+			// Set pin data for the trigger node with the custom payload
+			payload.workflowData.pinData = {
+				...(workflow.pinData || {}),
+				[triggerNode.name]: [{ json: options.triggerData.payload as IDataObject }],
+			};
+
+			// Set empty startNodes array to signal "full execution with pinned data"
+			// executeManually will find the pinned trigger and populate this
+			payload.startNodes = [];
+
+			if (options.destinationNode) {
+				payload.destinationNode = options.destinationNode;
+			}
+
+			return payload;
+		}
+
+		// CASE 2: Partial execution (resuming from previous run)
+		// User is re-running part of a workflow with cached data
+		if (previousRunData && options.destinationNode) {
+			this.logger.debug('Building payload: Partial execution', {
+				destinationNode: options.destinationNode,
+				dirtyNodesCount: options.dirtyNodes?.length || 0,
+				cachedNodesCount: Object.keys(previousRunData).length,
+			});
+
+			payload.runData = previousRunData;
+			payload.destinationNode = options.destinationNode;
+			payload.dirtyNodeNames = options.dirtyNodes || [];
+			if (previousPinData) {
+				payload.workflowData.pinData = previousPinData;
+			}
+
+			return payload;
+		}
+
+		// CASE 3: Full execution with input data
+		// User wants to run the entire workflow with specific input
+		if (inputData) {
+			this.logger.debug('Building payload: Full execution with input data');
+
+			// Find all activator nodes (triggers, webhooks, etc.)
+			// Using the same logic as findAllPinnedActivators but without pinData requirement
+			const activatorNodes = workflow.nodes.filter(
+				(node) =>
+					!node.disabled &&
+					['trigger', 'webhook'].some((suffix) => node.type.toLowerCase().endsWith(suffix)) &&
+					node.type !== 'n8n-nodes-base.respondToWebhook',
+			);
+
+			if (activatorNodes.length === 0) {
+				throw new BadRequestError('Workflow has no trigger or webhook nodes');
+			}
+
+			// Prioritize Manual Trigger, then Webhook, then first activator
+			let startNode = activatorNodes.find((node) => node.type === 'n8n-nodes-base.manualTrigger');
+
+			if (!startNode) {
+				startNode = activatorNodes.find((node) => node.type.toLowerCase().includes('webhook'));
+			}
+
+			if (!startNode) {
+				startNode = activatorNodes[0];
+			}
+
+			this.logger.debug('Selected start node', {
+				nodeName: startNode.name,
+				nodeType: startNode.type,
+			});
+
+			// Set trigger to start from
+			payload.triggerToStartFrom = {
+				name: startNode.name,
+			};
+
+			// Set pin data for the trigger node with the input data
+			payload.workflowData.pinData = {
+				...(workflow.pinData || {}),
+				[startNode.name]: [{ json: inputData as IDataObject }],
+			};
+
+			// Set empty startNodes array to signal "full execution with pinned data"
+			// executeManually will find the pinned trigger and populate this
+			payload.startNodes = [];
+
+			if (options.destinationNode) {
+				payload.destinationNode = options.destinationNode;
+			}
+
+			return payload;
+		}
+
+		// CASE 4: Full execution without input data
+		// User wants to run the workflow as-is (e.g., scheduled trigger with no input)
+		this.logger.debug('Building payload: Full execution without input data', {
+			destinationNode: options.destinationNode,
+		});
+
+		if (options.destinationNode) {
+			payload.destinationNode = options.destinationNode;
+		}
+
+		if (previousPinData) {
+			payload.workflowData.pinData = previousPinData;
+		}
+
+		return payload;
 	}
 }

@@ -1,4 +1,9 @@
-import { ImportWorkflowFromUrlDto, ROLE, TransferWorkflowBodyDto } from '@n8n/api-types';
+import {
+	ImportWorkflowFromUrlDto,
+	ROLE,
+	TransferWorkflowBodyDto,
+	WorkflowExecuteDto,
+} from '@n8n/api-types';
 import { Logger } from '@n8n/backend-common';
 import { GlobalConfig } from '@n8n/config';
 import type { Project } from '@n8n/db';
@@ -467,6 +472,71 @@ export class WorkflowsController {
 			req.user,
 			req.headers['push-ref'],
 		);
+	}
+
+	/**
+	 * Execute a workflow with simplified public API
+	 *
+	 * This endpoint provides a user-friendly interface for workflow execution
+	 * that automatically handles different execution types and node configurations.
+	 *
+	 * @example Simple execution
+	 * POST /workflows/:workflowId/execute
+	 * { "data": { "userId": 123 } }
+	 *
+	 * @example Custom trigger
+	 * POST /workflows/:workflowId/execute
+	 * {
+	 *   "options": {
+	 *     "triggerData": {
+	 *       "triggerName": "Webhook",
+	 *       "payload": { "event": "user.created" }
+	 *     }
+	 *   }
+	 * }
+	 *
+	 * @example Partial execution
+	 * POST /workflows/:workflowId/execute
+	 * {
+	 *   "options": {
+	 *     "executionId": "prev-exec-id",
+	 *     "destinationNode": "Send Email",
+	 *     "dirtyNodes": ["Send Email"]
+	 *   }
+	 * }
+	 */
+	@Post('/:workflowId/execute')
+	@ProjectScope('workflow:execute')
+	async execute(
+		req: AuthenticatedRequest<{ workflowId: string }, {}, WorkflowExecuteDto>,
+		_res: express.Response,
+	) {
+		const { workflowId } = req.params;
+		const body = req.body;
+		this.logger.debug('Public workflow execution endpoint called', {
+			workflowId,
+			userId: req.user.id,
+			hasData: !!body.data,
+			hasOptions: !!body.options,
+		});
+
+		// Execute the workflow via the service
+		const result = await this.workflowExecutionService.executeWorkflow(
+			workflowId,
+			body.data,
+			body.options || {},
+			req.user,
+		);
+
+		// Log execution started
+		this.logger.info('Workflow execution initiated via public API', {
+			workflowId,
+			executionId: result.executionId,
+			userId: req.user.id,
+			status: result.status,
+		});
+
+		return result;
 	}
 
 	@Licensed('feat:sharing')

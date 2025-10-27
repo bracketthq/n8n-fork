@@ -102,6 +102,14 @@ export type RelayEventMap = {
 		publicApi: boolean;
 	};
 
+	'workflow-executed': {
+		user: UserLike;
+		workflowId: string;
+		workflow: IWorkflowDb;
+		executionId: string;
+		publicApi: boolean;
+	};
+
 	'workflow-pre-execute': {
 		executionId: string;
 		data: IWorkflowExecutionDataProcess /* main process */ | IWorkflowBase /* worker */;

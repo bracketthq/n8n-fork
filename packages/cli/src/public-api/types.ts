@@ -86,6 +86,22 @@ export declare namespace WorkflowRequest {
 	type GetTags = Get;
 	type UpdateTags = AuthenticatedRequest<{ id: string }, {}, TagEntity[]>;
 	type Transfer = AuthenticatedRequest<{ id: string }, {}, { destinationProjectId: string }>;
+	type Execute = AuthenticatedRequest<
+		{ id: string },
+		{},
+		{
+			data?: Record<string, unknown>;
+			options?: {
+				destinationNode?: string;
+				executionId?: string;
+				dirtyNodes?: string[];
+				triggerData?: {
+					triggerName: string;
+					payload: Record<string, unknown>;
+				};
+			};
+		}
+	>;
 }
 
 export declare namespace UserRequest {

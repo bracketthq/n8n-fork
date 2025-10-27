@@ -1,0 +1,17 @@
+type: object
+additionalProperties: false
+required:
+  - executionId
+properties:
+  executionId:
+    type: string
+    description: Unique identifier for the execution
+    example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+  status:
+    type: string
+    enum:
+      - waiting
+    description: |
+      Execution status (only present when workflow is waiting for external input).
+      - waiting: Workflow started but is paused, waiting for external event (webhook, form submission, etc.)
+    example: waiting

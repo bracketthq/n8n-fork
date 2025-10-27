@@ -1,0 +1,50 @@
+type: object
+additionalProperties: false
+properties:
+  data:
+    type: object
+    description: Input data to inject into the workflow's first trigger node
+    additionalProperties: true
+    example:
+      userId: 123
+      email: user@example.com
+  options:
+    type: object
+    description: Advanced execution options
+    additionalProperties: false
+    properties:
+      destinationNode:
+        type: string
+        description: Stop execution at this node (useful for testing workflow segments)
+        example: Process Data
+      executionId:
+        type: string
+        description: ID of a previous execution to resume from (for partial execution with cached data)
+        example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+      dirtyNodes:
+        type: array
+        description: Nodes that should be re-executed (used with executionId for partial execution)
+        items:
+          type: string
+        example:
+          - Send Email
+          - Log Result
+      triggerData:
+        type: object
+        description: Custom trigger configuration to start from a specific trigger with test data
+        additionalProperties: false
+        required:
+          - triggerName
+          - payload
+        properties:
+          triggerName:
+            type: string
+            description: Name of the trigger node to start execution from
+            example: Webhook
+          payload:
+            type: object
+            description: Data to inject into the trigger node
+            additionalProperties: true
+            example:
+              event: user.created
+              userId: 456

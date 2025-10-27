@@ -1,0 +1,79 @@
+post:
+  x-eov-operation-id: executeWorkflow
+  x-eov-operation-handler: v1/handlers/workflows/workflows.handler
+  tags:
+    - Workflow
+  summary: Execute a workflow
+  description: |
+    Execute a workflow with automatic execution type detection. This endpoint provides a simplified
+    interface for workflow execution that works with all node types (triggers, webhooks, forms, AI tools, etc.).
+
+    **Execution Types:**
+    - **Simple execution**: Send `data` to execute the workflow with input data
+    - **Custom trigger**: Use `options.triggerData` to start from a specific trigger with test data
+    - **Partial execution**: Use `options.executionId` and `options.dirtyNodes` to re-run specific nodes
+    - **Full execution**: Send empty body `{}` to run the workflow as-is
+
+    **Response Behavior:**
+    - Returns `executionId` immediately (async execution)
+    - If workflow is waiting for external input (form/webhook), returns `status: "waiting"`
+    - Use `GET /executions/{executionId}` to check execution status and retrieve results
+  parameters:
+    - $ref: '../schemas/parameters/workflowId.yml'
+  requestBody:
+    description: Execution configuration
+    content:
+      application/json:
+        schema:
+          $ref: '../schemas/workflowExecuteRequest.yml'
+        examples:
+          simpleExecution:
+            summary: Simple execution with input data
+            value:
+              data:
+                userId: 123
+                email: user@example.com
+          customTrigger:
+            summary: Execute from specific trigger
+            value:
+              options:
+                triggerData:
+                  triggerName: Webhook
+                  payload:
+                    event: user.created
+                    userId: 456
+          partialExecution:
+            summary: Re-execute specific nodes
+            value:
+              options:
+                executionId: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                destinationNode: Send Email
+                dirtyNodes:
+                  - Send Email
+                  - Log Result
+          noInput:
+            summary: Execute workflow as-is
+            value: {}
+  responses:
+    '200':
+      description: Execution started successfully
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/workflowExecuteResponse.yml'
+          examples:
+            executionStarted:
+              summary: Execution started (running in background)
+              value:
+                executionId: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+            waitingForInput:
+              summary: Execution waiting for external input
+              value:
+                executionId: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                status: waiting
+    '400':
+      $ref: '../../../../shared/spec/responses/badRequest.yml'
+    '401':
+      $ref: '../../../../shared/spec/responses/unauthorized.yml'
+    '404':
+      $ref: '../../../../shared/spec/responses/notFound.yml'
