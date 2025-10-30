@@ -3,11 +3,19 @@
 # Build and Push N8N Custom Image to Google Container Registry (GCR)
 #
 # Usage:
-#   ./build-gcp.sh <version>
+#   ./build-gcp.sh <version> [platform]
+#
+# Arguments:
+#   version  - Version tag (required)
+#   platform - Target platform (optional, default: amd64)
+#              Options: amd64, arm64, both
 #
 # Examples:
-#   ./build-gcp.sh v1.0.0
-#   ./build-gcp.sh $(git rev-parse --short HEAD)
+#   ./build-gcp.sh v1.0.0              # Build for amd64 only
+#   ./build-gcp.sh v1.0.0 amd64        # Build for amd64 only
+#   ./build-gcp.sh v1.0.0 arm64        # Build for arm64 only
+#   ./build-gcp.sh v1.0.0 both         # Build for both platforms
+#   ./build-gcp.sh $(git rev-parse --short HEAD) both
 ###############################################################################
 
 set -e
@@ -33,12 +41,44 @@ IMAGE_NAME="brackett-n8n"
 
 if [ $# -eq 0 ]; then
     log_error "Version argument required"
-    echo "Usage: $0 <version>"
-    echo "Example: $0 v1.0.0"
+    echo "Usage: $0 <version> [platform]"
+    echo ""
+    echo "Arguments:"
+    echo "  version  - Version tag (required)"
+    echo "  platform - Target platform (optional, default: amd64)"
+    echo "             Options: amd64, arm64, both"
+    echo ""
+    echo "Examples:"
+    echo "  $0 v1.0.0              # Build for amd64 only"
+    echo "  $0 v1.0.0 amd64        # Build for amd64 only"
+    echo "  $0 v1.0.0 arm64        # Build for arm64 only"
+    echo "  $0 v1.0.0 both         # Build for both platforms"
     exit 1
 fi
 
 VERSION=$1
+PLATFORM_ARG=${2:-amd64}
+
+# Validate and set platform
+case "$PLATFORM_ARG" in
+    amd64)
+        DOCKER_PLATFORM="linux/amd64"
+        PLATFORM_DESC="linux/amd64"
+        ;;
+    arm64)
+        DOCKER_PLATFORM="linux/arm64"
+        PLATFORM_DESC="linux/arm64"
+        ;;
+    both)
+        DOCKER_PLATFORM="linux/amd64,linux/arm64"
+        PLATFORM_DESC="linux/amd64, linux/arm64"
+        ;;
+    *)
+        log_error "Invalid platform: $PLATFORM_ARG"
+        echo "Valid options: amd64, arm64, both"
+        exit 1
+        ;;
+esac
 FULL_IMAGE_NAME="gcr.io/${GCP_PROJECT_ID}/${IMAGE_NAME}:${VERSION}"
 LATEST_IMAGE_NAME="gcr.io/${GCP_PROJECT_ID}/${IMAGE_NAME}:latest"
 
@@ -64,43 +104,53 @@ if [ ! -f "package.json" ]; then
     exit 1
 fi
 
-log_info "Building image: ${FULL_IMAGE_NAME}"
+log_info "Building Docker image: ${FULL_IMAGE_NAME}"
+log_info "Platform(s): ${PLATFORM_DESC}"
 echo ""
 
-# Build with GCR tag
-IMAGE_BASE_NAME="gcr.io/${GCP_PROJECT_ID}/${IMAGE_NAME}" \
-IMAGE_TAG="${VERSION}" \
-pnpm build:docker
+# Ensure buildx is available
+log_info "Setting up Docker buildx..."
+docker buildx create --use --name n8n-builder --driver docker-container 2>/dev/null || docker buildx use n8n-builder 2>/dev/null || true
 
-if [ $? -ne 0 ]; then
-    log_error "Build failed"
-    exit 1
-fi
-
-log_success "Build completed"
-echo ""
-
-# Configure Docker auth for GCR
+# Configure Docker auth for GCR (needs to be done before buildx push)
 log_info "Configuring Docker authentication for GCR..."
 gcloud auth configure-docker gcr.io --quiet
 
-# Push versioned image
-log_info "Pushing ${FULL_IMAGE_NAME}..."
-docker push "${FULL_IMAGE_NAME}"
+# Build the app first (required before Docker build)
+log_info "Building n8n application..."
+pnpm run build:n8n
 
 if [ $? -ne 0 ]; then
-    log_error "Failed to push image"
+    log_error "Application build failed"
     exit 1
 fi
 
-log_success "Pushed ${VERSION}"
+log_success "Application build completed"
+echo ""
 
-# Tag and push as latest
-log_info "Tagging and pushing as latest..."
-docker tag "${FULL_IMAGE_NAME}" "${LATEST_IMAGE_NAME}"
-docker push "${LATEST_IMAGE_NAME}"
+# Build and push Docker image
+if [ "$PLATFORM_ARG" = "both" ]; then
+    log_info "Building and pushing multi-platform Docker image..."
+    log_warning "This may take 10-15 minutes as it builds for both architectures"
+else
+    log_info "Building and pushing Docker image for ${PLATFORM_DESC}..."
+fi
 
-log_success "Pushed latest"
+docker buildx build \
+    --platform "${DOCKER_PLATFORM}" \
+    -t "${FULL_IMAGE_NAME}" \
+    -t "${LATEST_IMAGE_NAME}" \
+    -f docker/images/n8n/Dockerfile \
+    --push \
+    .
+
+if [ $? -ne 0 ]; then
+    log_error "Docker build and push failed"
+    exit 1
+fi
+
+log_success "Pushed ${VERSION} (${PLATFORM_DESC})"
+log_success "Pushed latest (${PLATFORM_DESC})"
 
 echo ""
 echo "╔════════════════════════════════════════════════════╗"
