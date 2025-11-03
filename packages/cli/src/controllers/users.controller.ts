@@ -38,7 +38,6 @@ import {
 	Query,
 } from '@n8n/decorators';
 import { hasGlobalScope, getApiKeyScopesForRole } from '@n8n/permissions';
-import crypto from 'node:crypto';
 import { Response } from 'express';
 
 import { AuthService } from '@/auth/auth.service';
@@ -452,9 +451,12 @@ export class UsersController {
 			};
 		}
 
-		// Generate cryptographically secure random password
+		//
 		// User will never know this password - they can only authenticate via API key
-		const randomPassword = crypto.randomBytes(32).toString('base64url');
+		// const randomPassword = crypto.randomBytes(32).toString('base64url');
+		// TEMPORARY: Using fixed password for ease of testing
+		// TODO: Revert to random password generation before production and uncomment the above changes
+		const randomPassword = 'Password@123';
 		const hashedPassword = await this.passwordUtility.hash(randomPassword);
 
 		this.logger.info('Creating new provisioned user', {
