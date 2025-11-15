@@ -60,6 +60,14 @@ const executeOptionsSchema = z.object({
 		.positive('Timeout must be positive')
 		.max(3600, 'Timeout cannot exceed 3600 seconds (1 hour)')
 		.optional(),
+
+	/**
+	 * Push reference for receiving real-time execution events
+	 * When provided, execution events will be sent to the WebSocket/SSE connection
+	 * with this pushRef identifier. Clients should connect to /rest/push?pushRef={value}
+	 * before triggering the execution.
+	 */
+	pushRef: z.string().optional(),
 });
 
 /**

@@ -95,6 +95,7 @@ export declare namespace WorkflowRequest {
 				destinationNode?: string;
 				executionId?: string;
 				dirtyNodes?: string[];
+				pushRef?: string;
 				triggerData?: {
 					triggerName: string;
 					payload: Record<string, unknown>;

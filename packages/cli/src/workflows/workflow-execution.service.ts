@@ -499,6 +499,7 @@ export class WorkflowExecutionService {
 				triggerName: string;
 				payload: Record<string, unknown>;
 			};
+			pushRef?: string;
 		} = {},
 		user: User,
 	): Promise<{
@@ -510,6 +511,7 @@ export class WorkflowExecutionService {
 			userId: user.id,
 			hasData: !!inputData,
 			options,
+			pushRef: options.pushRef,
 		});
 
 		// Step 1: Load workflow from database
@@ -579,7 +581,7 @@ export class WorkflowExecutionService {
 		const result = await this.executeManually(
 			payload,
 			user,
-			undefined, // pushRef
+			options.pushRef, // pushRef - for receiving real-time execution events
 			undefined, // streamingEnabled
 			undefined, // httpResponse
 		);

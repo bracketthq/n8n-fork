@@ -11,12 +11,12 @@ import { InstanceSettings } from 'n8n-core';
 import { parse as parseUrl } from 'url';
 import { Server as WSServer } from 'ws';
 
-import { AuthService } from '@/auth/auth.service';
 import { BadRequestError } from '@/errors/response-errors/bad-request.error';
 import { Publisher } from '@/scaling/pubsub/publisher.service';
 import { TypedEmitter } from '@/typed-emitter';
 
 import { validateOriginHeaders } from './origin-validator';
+import { PushAuthMiddleware } from './push-auth.middleware';
 import { PushConfig } from './push.config';
 import { SSEPush } from './sse.push';
 import type { OnPushMessage, PushResponse, SSEPushRequest, WebSocketPushRequest } from './types';
@@ -52,8 +52,8 @@ export class Push extends TypedEmitter<PushEvents> {
 		private readonly config: PushConfig,
 		private readonly instanceSettings: InstanceSettings,
 		private readonly logger: Logger,
-		private readonly authService: AuthService,
 		private readonly publisher: Publisher,
+		private readonly pushAuthMiddleware: PushAuthMiddleware,
 	) {
 		super();
 		this.logger = this.logger.scoped('push');
@@ -94,7 +94,8 @@ export class Push extends TypedEmitter<PushEvents> {
 		app.use(
 			`/${restEndpoint}/push`,
 
-			this.authService.createAuthMiddleware({ allowSkipMFA: false }),
+			// Support both API key and cookie authentication
+			this.pushAuthMiddleware.createPushAuthMiddleware(),
 			(req: SSEPushRequest | WebSocketPushRequest, res: PushResponse) =>
 				this.handleRequest(req, res),
 		);

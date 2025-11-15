@@ -29,6 +29,10 @@ properties:
         example:
           - Send Email
           - Log Result
+      pushRef:
+        type: string
+        description: Push reference identifier for receiving real-time execution events via WebSocket/SSE connection. Connect to /rest/push?pushRef={value} before triggering execution.
+        example: abc123def4
       triggerData:
         type: object
         description: Custom trigger configuration to start from a specific trigger with test data

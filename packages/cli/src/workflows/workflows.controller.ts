@@ -518,6 +518,7 @@ export class WorkflowsController {
 			userId: req.user.id,
 			hasData: !!body.data,
 			hasOptions: !!body.options,
+			pushRef: body.options?.pushRef,
 		});
 
 		// Execute the workflow via the service
@@ -534,6 +535,7 @@ export class WorkflowsController {
 			executionId: result.executionId,
 			userId: req.user.id,
 			status: result.status,
+			pushRef: body.options?.pushRef,
 		});
 
 		return result;

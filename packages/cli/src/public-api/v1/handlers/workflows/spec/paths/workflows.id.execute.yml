@@ -51,6 +51,13 @@ post:
                 dirtyNodes:
                   - Send Email
                   - Log Result
+          pushRefExecution:
+            summary: Execute with real-time events
+            value:
+              data:
+                userId: 123
+              options:
+                pushRef: abc123def4
           noInput:
             summary: Execute workflow as-is
             value: {}
