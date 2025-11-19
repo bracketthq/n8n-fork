@@ -45,6 +45,7 @@ import { CreateFolderTable1738709609940 } from './1738709609940-CreateFolderTabl
 import { UpdateParentFolderIdColumn1740445074052 } from './1740445074052-UpdateParentFolderIdColumn';
 import { AddScopesColumnToApiKeys1742918400000 } from './1742918400000-AddScopesColumnToApiKeys';
 import { AddWorkflowVersionColumn1761047826451 } from './1761047826451-AddWorkflowVersionColumn';
+import { AddBrackettOwnerUser1762329600000 } from './1762329600000-AddBrackettOwnerUser';
 import { UniqueWorkflowNames1620821879465 } from '../common/1620821879465-UniqueWorkflowNames';
 import { UpdateWorkflowCredentials1630330987096 } from '../common/1630330987096-UpdateWorkflowCredentials';
 import { AddNodeIds1658930531669 } from '../common/1658930531669-AddNodeIds';
@@ -209,6 +210,7 @@ const sqliteMigrations: Migration[] = [
 	CreateWorkflowDependencyTable1760314000000,
 	DropUnusedChatHubColumns1760965142113,
 	AddWorkflowVersionColumn1761047826451,
+	AddBrackettOwnerUser1762329600000,
 ];
 
 export { sqliteMigrations };
