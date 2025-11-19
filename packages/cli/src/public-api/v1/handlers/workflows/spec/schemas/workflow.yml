@@ -41,6 +41,18 @@ properties:
         nullable: true
       - type: object
         nullable: true
+  pinData:
+    type: object
+    nullable: true
+    description: >
+      Pinned data for workflow nodes. Each node name maps to an array of execution data.
+      Data can be in simplified format (plain objects) or full format (with json/binary/pairedItem properties).
+    additionalProperties:
+      type: array
+      items:
+        type: object
+        additionalProperties: true
+    example: { 'Webhook': [{ 'json': { 'id': 1, 'data': 'test' } }] }
   tags:
     type: array
     items:
